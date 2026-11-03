@@ -1,0 +1,14 @@
+# Local dev / env
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# azd
+.azure/

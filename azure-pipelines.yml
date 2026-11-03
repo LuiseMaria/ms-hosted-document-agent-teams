@@ -1,0 +1,113 @@
+trigger: none
+pr: none
+
+name: hosted-agent-deployment-$(Date:yyyyMMdd)$(Rev:.r)
+
+parameters:
+  - name: azureServiceConnection
+    type: string
+    default: REPLACE_WITH_AZURE_SERVICE_CONNECTION
+  - name: azdEnvironment
+    type: string
+    default: example-agent-dev
+  - name: deploymentAgentPool
+    displayName: Linux agent pool with private Spoke connectivity
+    type: string
+    default: REPLACE_WITH_PRIVATE_AGENT_POOL
+  - name: enableTeamsEndpoint
+    displayName: Set up tenant-wide Teams endpoint (no publishing)
+    type: boolean
+    default: true
+
+variables:
+  # The variable group contains environment-specific IDs and endpoints. Do not
+  # commit connection strings, keys, or subscription-specific resource IDs.
+  - group: REPLACE_WITH_AGENT_VARIABLE_GROUP
+
+stages:
+  - stage: Deploy
+    displayName: Deploy hosted agent
+    condition: succeeded()
+    jobs:
+      - deployment: DeployHostedAgent
+        displayName: Deploy code to existing Spoke project
+        pool:
+          name: '${{ parameters.deploymentAgentPool }}'
+        environment: example-agent
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  clean: true
+                - task: setup-azd@v2
+                  displayName: Install azd
+                - task: AzureCLI@2
+                  displayName: Deploy hosted agent source code
+                  inputs:
+                    azureSubscription: '${{ parameters.azureServiceConnection }}'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      set -euo pipefail
+
+                      for name in SUBSCRIPTION_ID RESOURCE_GROUP FOUNDRY_ACCOUNT_NAME \
+                        FOUNDRY_PROJECT_NAME FOUNDRY_PROJECT_ENDPOINT MODEL_DEPLOYMENT_NAME \
+                        AI_GATEWAY_BASE_URL AI_GATEWAY_AUDIENCE AI_GATEWAY_API_VERSION \
+                        CONTENT_UNDERSTANDING_ENDPOINT AZD_ENV_NAME; do
+                        value="${!name}"
+                        if [[ -z "$value" || "$value" == *'$('* ]]; then
+                          echo "##vso[task.logissue type=error]Missing pipeline configuration: $name"
+                          exit 1
+                        fi
+                      done
+
+                      az account set --subscription "$SUBSCRIPTION_ID"
+                      accountId="/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/$FOUNDRY_ACCOUNT_NAME"
+                      projectId="$accountId/projects/$FOUNDRY_PROJECT_NAME"
+                      az rest --method get \
+                        --url "https://management.azure.com$projectId?api-version=2025-04-01-preview" \
+                        --query id -o tsv
+                      location="$(az resource show --ids "$accountId" --query location -o tsv)"
+                      tenantId="$(az account show --query tenantId -o tsv)"
+
+                      azd config set auth.useAzCliAuth true
+                      azd extension install microsoft.foundry --version 1.0.0-beta.17 --no-prompt
+                      azd ai agent --help >/dev/null
+                      azd env new "$AZD_ENV_NAME" --subscription "$SUBSCRIPTION_ID" \
+                        --location "$location" --no-prompt
+                      azd env set AZURE_TENANT_ID "$tenantId"
+                      azd env set AZURE_RESOURCE_GROUP "$RESOURCE_GROUP"
+                      azd env set AZURE_AI_ACCOUNT_NAME "$FOUNDRY_ACCOUNT_NAME"
+                      azd env set AZURE_AI_PROJECT_NAME "$FOUNDRY_PROJECT_NAME"
+                      azd env set FOUNDRY_PROJECT_ENDPOINT "$FOUNDRY_PROJECT_ENDPOINT"
+                      azd env set AZURE_AI_PROJECT_ENDPOINT "$FOUNDRY_PROJECT_ENDPOINT"
+                      azd env set AZURE_AI_PROJECT_ID "$projectId"
+                      azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME "$MODEL_DEPLOYMENT_NAME"
+                      azd env set AI_GATEWAY_BASE_URL "$AI_GATEWAY_BASE_URL" # URL of the AI Gateway. For example, https://my-ai-gateway.azure-api.net
+                      azd env set AI_GATEWAY_AUDIENCE "$AI_GATEWAY_AUDIENCE" # What is an audience? -> = the identifier of the intended recipient of the token; For example, api://central-ai-gateway
+                      azd env set AI_GATEWAY_API_VERSION "$AI_GATEWAY_API_VERSION"
+                      azd env set AZURE_CONTENT_UNDERSTANDING_ENDPOINT "$CONTENT_UNDERSTANDING_ENDPOINT"
+
+                      # Infrastructure and project monitoring belong to the Spoke template.
+                      azd deploy --environment "$AZD_ENV_NAME" --no-prompt
+                      azd ai agent show --environment "$AZD_ENV_NAME" --no-prompt
+                      if [[ "${ENABLE_TEAMS_ENDPOINT,,}" == "true" ]]; then
+                        python3 scripts/enable_teams_endpoint.py \
+                          --project-endpoint "$FOUNDRY_PROJECT_ENDPOINT" \
+                          --agent-name document-agent
+                      fi
+                  env:
+                    AZD_CONFIG_DIR: $(Agent.TempDirectory)/azd-$(Build.BuildId)-$(System.JobAttempt)
+                    AZD_ENV_NAME: '${{ parameters.azdEnvironment }}'
+                    SUBSCRIPTION_ID: $(SubscriptionId)
+                    RESOURCE_GROUP: $(ResourceGroup)
+                    FOUNDRY_ACCOUNT_NAME: $(FoundryAccountName)
+                    FOUNDRY_PROJECT_NAME: $(FoundryProjectName)
+                    FOUNDRY_PROJECT_ENDPOINT: $(FoundryProjectEndpoint)
+                    MODEL_DEPLOYMENT_NAME: $(AzureAiModelDeploymentName)
+                    AI_GATEWAY_BASE_URL: $(AiGatewayBaseUrl)
+                    AI_GATEWAY_AUDIENCE: $(AiGatewayAudience)
+                    AI_GATEWAY_API_VERSION: $(AiGatewayApiVersion)
+                    CONTENT_UNDERSTANDING_ENDPOINT: $(ContentUnderstandingEndpoint)
+                    ENABLE_TEAMS_ENDPOINT: '${{ parameters.enableTeamsEndpoint }}'

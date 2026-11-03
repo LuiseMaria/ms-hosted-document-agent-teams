@@ -1,0 +1,33 @@
+# Document Agent hosted agent dependencies.
+
+# Agent Framework + Foundry hosting (Responses protocol).
+agent-framework-foundry
+# >=1.0.0b260910 required: introduces the `history_source` parameter on
+# ResponsesHostServer, which we set explicitly to "agent" for our custom
+# BaseAgent implementation (DocumentAgent is not a RawAgent).
+agent-framework-foundry-hosting>=1.0.0b260910
+# Generic OpenAI-compatible chat client used to call the central AI gateway
+# (APIM) directly -- required because Document Agent is a Foundry hosted agent and
+# the admin-connected-model mechanism (Foundry project connection) is
+# prompt-agent only. See main.py:_gateway_chat_client.
+agent-framework-openai
+
+# Direct SDK dependencies for authenticated project file downloads.
+azure-ai-projects>=2.6.1,<3
+openai>=3.23.0,<4
+
+# Azure authentication (Managed Identity in Foundry, az login locally).
+azure-identity>=1.19.0
+azure-monitor-opentelemetry-exporter>=1.0.0b48,<2
+
+# OCR via Azure AI Document Intelligence (replaces local Tesseract).
+azure-ai-documentintelligence>=1.0.0
+
+# Local development: load environment variables from a .env file.
+python-dotenv>=1.0.1
+
+# debugpy enables local debugging of this agent with the Foundry Toolkit VS Code extension.
+debugpy
+
+# Content understanding via Azure AI Content Understanding
+azure-ai-contentunderstanding>=1.1.0

@@ -1,0 +1,820 @@
+openapi: 3.1.0
+
+info:
+  title: Document Agent Generation API
+  version: 1.0.0
+  description: |
+    REST API zur asynchronen Erzeugung von Firmenanalysen,
+    Marktfolge-Voten und Markt-Voten.
+
+servers:
+  - url: https://api.example.internal/document/v1
+    description: Produktion
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Generation Jobs
+  - name: Feedback
+
+paths:
+  /generation-jobs:
+    post:
+      tags:
+        - Generation Jobs
+      summary: Neuen Generierungsauftrag anlegen
+      operationId: createGenerationJob
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateGenerationJobRequest"
+      responses:
+        "202":
+          description: Auftrag wurde angenommen.
+          headers:
+            Location:
+              description: URL zur Statusabfrage
+              schema:
+                type: string
+                format: uri-reference
+            Retry-After:
+              description: Empfohlenes Polling-Intervall in Sekunden
+              schema:
+                type: integer
+                minimum: 1
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JobAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /generation-jobs/{runId}:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+
+    get:
+      tags:
+        - Generation Jobs
+      summary: Status und Ergebnis eines Auftrags abrufen
+      operationId: getGenerationJob
+      responses:
+        "200":
+          description: Aktueller Stand des Auftrags
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GenerationJob"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /generation-jobs/{runId}/feedback:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+
+    post:
+      tags:
+        - Feedback
+      summary: Fachliches Feedback zu einem Entwurf übermitteln
+      operationId: submitGenerationFeedback
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackRequest"
+      responses:
+        "202":
+          description: Feedback wurde angenommen.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackAccepted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    RunId:
+      name: runId
+      in: path
+      required: true
+      description: Technische ID des Generierungsauftrags
+      schema:
+        type: string
+        format: uuid
+
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Verhindert doppelte Aufträge bei Wiederholungen.
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C-Trace-Context zur technischen Nachverfolgung.
+      schema:
+        type: string
+
+  schemas:
+    CreateGenerationJobRequest:
+      oneOf:
+        - $ref: "#/components/schemas/CompanyAnalysisRequest"
+        - $ref: "#/components/schemas/BackOfficeVoteRequest"
+        - $ref: "#/components/schemas/MarketVoteRequest"
+      discriminator:
+        propertyName: documentType
+        mapping:
+          FIRMENANALYSE: "#/components/schemas/CompanyAnalysisRequest"
+          MARKTFOLGE_VOTUM: "#/components/schemas/BackOfficeVoteRequest"
+          MARKT_VOTUM: "#/components/schemas/MarketVoteRequest"
+
+    CommonRequestFields:
+      type: object
+      required:
+        - caseId
+        - businessType
+        - documentType
+        - triggeredBy
+        - language
+      properties:
+        caseId:
+          type: string
+          minLength: 1
+          description: Stabiler fachlicher Schlüssel des Kreditvorgangs.
+        businessType:
+          type: string
+          enum:
+            - BANK
+            - LEASING
+        documentType:
+          $ref: "#/components/schemas/DocumentType"
+        triggeredBy:
+          type: string
+          minLength: 1
+          description: Personalkennung der auslösenden Person.
+        language:
+          type: string
+          enum:
+            - DE
+            - EN
+          default: DE
+
+    CompanyAnalysisRequest:
+      allOf:
+        - $ref: "#/components/schemas/CommonRequestFields"
+        - type: object
+          required:
+            - context
+          properties:
+            documentType:
+              const: FIRMENANALYSE
+            context:
+              oneOf:
+                - $ref: "#/components/schemas/BankAnalysisContext"
+                - $ref: "#/components/schemas/LeasingAnalysisContext"
+            documents:
+              type: array
+              default: []
+              items:
+                $ref: "#/components/schemas/PreviousCompanyAnalysis"
+      unevaluatedProperties: false
+
+    BackOfficeVoteRequest:
+      allOf:
+        - $ref: "#/components/schemas/CommonRequestFields"
+        - type: object
+          required:
+            - context
+            - documents
+            - application
+          properties:
+            documentType:
+              const: MARKTFOLGE_VOTUM
+            context:
+              $ref: "#/components/schemas/VoteContext"
+            documents:
+              type: array
+              minItems: 1
+              items:
+                oneOf:
+                  - $ref: "#/components/schemas/ApprovedCompanyAnalysis"
+                  - $ref: "#/components/schemas/PreviousBackOfficeVote"
+              contains:
+                $ref: "#/components/schemas/ApprovedCompanyAnalysis"
+              minContains: 1
+            application:
+              $ref: "#/components/schemas/CreditApplication"
+      unevaluatedProperties: false
+
+    MarketVoteRequest:
+      allOf:
+        - $ref: "#/components/schemas/CommonRequestFields"
+        - type: object
+          required:
+            - context
+            - documents
+            - application
+          properties:
+            documentType:
+              const: MARKT_VOTUM
+            context:
+              $ref: "#/components/schemas/VoteContext"
+            documents:
+              type: array
+              minItems: 1
+              items:
+                oneOf:
+                  - $ref: "#/components/schemas/ApprovedCompanyAnalysis"
+                  - $ref: "#/components/schemas/PreviousBackOfficeVote"
+                  - $ref: "#/components/schemas/PreviousMarketVote"
+              contains:
+                $ref: "#/components/schemas/ApprovedCompanyAnalysis"
+              minContains: 1
+            application:
+              $ref: "#/components/schemas/CreditApplication"
+      unevaluatedProperties: false
+
+    DocumentType:
+      type: string
+      enum:
+        - FIRMENANALYSE
+        - MARKTFOLGE_VOTUM
+        - MARKT_VOTUM
+
+    BankAnalysisContext:
+      type: object
+      required:
+        - businessType
+        - creditUnit
+        - balanceSheetId
+        - uekaKey
+        - fksKey
+      properties:
+        businessType:
+          const: BANK
+        creditUnit:
+          $ref: "#/components/schemas/CreditUnit"
+        balanceSheetId:
+          type: string
+        uekaKey:
+          type: string
+        fksKey:
+          type: string
+        standardReference:
+          type: string
+      additionalProperties: false
+
+    LeasingAnalysisContext:
+      type: object
+      required:
+        - businessType
+        - zgpId
+        - balanceSheetId
+      properties:
+        businessType:
+          const: LEASING
+        zgpId:
+          type: string
+        balanceSheetId:
+          type: string
+        uekaKey:
+          type: string
+        standardReference:
+          type: string
+        financialData:
+          $ref: "#/components/schemas/FinancialData"
+      additionalProperties: false
+
+    VoteContext:
+      type: object
+      properties:
+        zgpId:
+          type: string
+        balanceSheetId:
+          type: string
+        uekaKey:
+          type: string
+        fksKey:
+          type: string
+        standardReference:
+          type: string
+        creditUnit:
+          $ref: "#/components/schemas/CreditUnit"
+      additionalProperties: false
+
+    CreditUnit:
+      type: object
+      required:
+        - hvId
+        - entities
+        - snapshotDate
+      properties:
+        hvId:
+          type: string
+        snapshotDate:
+          type: string
+          format: date-time
+        entities:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/CreditUnitEntity"
+      additionalProperties: false
+
+    CreditUnitEntity:
+      type: object
+      required:
+        - zgpId
+        - role
+        - consolidationRelevant
+        - leading
+      properties:
+        zgpId:
+          type: string
+        role:
+          type: string
+        consolidationRelevant:
+          type: boolean
+        leading:
+          type: boolean
+      additionalProperties: false
+
+    FinancialData:
+      type: object
+      required:
+        - version
+        - active
+      properties:
+        version:
+          type: string
+        active:
+          type: boolean
+        asOf:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    BaseDocument:
+      type: object
+      required:
+        - type
+        - content
+        - versionDate
+        - status
+      properties:
+        type:
+          type: string
+        content:
+          $ref: "#/components/schemas/Content"
+        versionDate:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - ENTWURF
+            - FREIGEGEBEN
+      additionalProperties: false
+
+    PreviousCompanyAnalysis:
+      allOf:
+        - $ref: "#/components/schemas/BaseDocument"
+        - type: object
+          properties:
+            type:
+              const: PREVIOUS_COMPANY_ANALYSIS
+
+    ApprovedCompanyAnalysis:
+      allOf:
+        - $ref: "#/components/schemas/BaseDocument"
+        - type: object
+          properties:
+            type:
+              const: APPROVED_COMPANY_ANALYSIS
+            status:
+              const: FREIGEGEBEN
+
+    PreviousBackOfficeVote:
+      allOf:
+        - $ref: "#/components/schemas/BaseDocument"
+        - type: object
+          properties:
+            type:
+              const: PREVIOUS_BACK_OFFICE_VOTE
+
+    PreviousMarketVote:
+      allOf:
+        - $ref: "#/components/schemas/BaseDocument"
+        - type: object
+          properties:
+            type:
+              const: PREVIOUS_MARKET_VOTE
+
+    Content:
+      type: object
+      required:
+        - mediaType
+        - value
+      properties:
+        mediaType:
+          type: string
+          enum:
+            - text/plain
+            - text/html
+        charset:
+          type: string
+          const: UTF-8
+          default: UTF-8
+        value:
+          type: string
+          minLength: 1
+          description: |
+            Vollständiger Textinhalt. Bei text/html ist ausschließlich
+            das vereinbarte und serverseitig sanitizte HTML-Subset zulässig.
+      additionalProperties: false
+
+    CreditApplication:
+      type: object
+      required:
+        - subject
+        - reasons
+        - limits
+        - exposure
+        - collateral
+        - rating
+      properties:
+        subject:
+          type: string
+        reasons:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        limits:
+          type: array
+          items:
+            $ref: "#/components/schemas/MoneyAmount"
+        exposure:
+          type: array
+          items:
+            $ref: "#/components/schemas/MoneyAmount"
+        collateral:
+          type: array
+          items:
+            type: string
+        rating:
+          type: string
+      additionalProperties: false
+
+    MoneyAmount:
+      type: object
+      required:
+        - amount
+        - currency
+      properties:
+        amount:
+          type: number
+        currency:
+          type: string
+          pattern: "^[A-Z]{3}$"
+          example: EUR
+      additionalProperties: false
+
+    JobAccepted:
+      type: object
+      required:
+        - runId
+        - caseId
+        - status
+        - createdAt
+        - links
+      properties:
+        runId:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+        status:
+          const: ACCEPTED
+        createdAt:
+          type: string
+          format: date-time
+        links:
+          type: object
+          required:
+            - self
+          properties:
+            self:
+              type: string
+              format: uri
+      additionalProperties: false
+
+    GenerationJob:
+      type: object
+      required:
+        - runId
+        - caseId
+        - businessType
+        - documentType
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        runId:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+        businessType:
+          type: string
+          enum:
+            - BANK
+            - LEASING
+        documentType:
+          $ref: "#/components/schemas/DocumentType"
+        status:
+          type: string
+          enum:
+            - ACCEPTED
+            - PROCESSING
+            - SUCCEEDED
+            - PARTIALLY_SUCCEEDED
+            - FAILED
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ResultMessage"
+        result:
+          oneOf:
+            - $ref: "#/components/schemas/GenerationResult"
+            - type: "null"
+      additionalProperties: false
+
+    GenerationResult:
+      type: object
+      required:
+        - plainText
+        - references
+        - modelVersion
+        - promptVersion
+        - generatedAt
+      properties:
+        plainText:
+          type: string
+          description: Kanonische Fassung für das bestehende Textfeld.
+        html:
+          type:
+            - string
+            - "null"
+          description: |
+            Optionale, sanitizte HTML-Darstellung. Externe Ressourcen,
+            Skripte, Event-Handler und eingebettete Objekte sind unzulässig.
+        references:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reference"
+        modelVersion:
+          type: string
+        promptVersion:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    Reference:
+      type: object
+      required:
+        - referenceId
+        - sourceSystem
+        - sourceKey
+      properties:
+        referenceId:
+          type: string
+          description: Stabile ID zur Verknüpfung mit Aussagen oder HTML-Ankern.
+        statementId:
+          type: string
+        htmlAnchorId:
+          type: string
+        sourceSystem:
+          type: string
+        sourceKey:
+          type: string
+        documentId:
+          type: string
+        balanceSheetId:
+          type: string
+      additionalProperties: false
+
+    ResultMessage:
+      type: object
+      required:
+        - severity
+        - code
+        - message
+      properties:
+        severity:
+          type: string
+          enum:
+            - INFO
+            - WARNING
+            - ERROR
+        code:
+          type: string
+        message:
+          type: string
+      additionalProperties: false
+
+    FeedbackRequest:
+      type: object
+      required:
+        - submittedBy
+        - releaseStatus
+        - finalContent
+      properties:
+        submittedBy:
+          type: string
+          description: Personalkennung der freigebenden Person.
+        releaseStatus:
+          type: string
+          enum:
+            - FREIGEGEBEN
+            - VERWORFEN
+            - NEUERZEUGUNG_ANGEFORDERT
+        finalContent:
+          $ref: "#/components/schemas/Content"
+        qualifiedFeedback:
+          $ref: "#/components/schemas/QualifiedFeedback"
+      additionalProperties: false
+
+    QualifiedFeedback:
+      type: object
+      properties:
+        categories:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - FACTUAL_ERROR
+              - MISSING_INFORMATION
+              - INCORRECT_REFERENCE
+              - LANGUAGE
+              - STRUCTURE
+              - RISK_ASSESSMENT
+              - OTHER
+        comment:
+          type: string
+          maxLength: 4000
+      additionalProperties: false
+
+    FeedbackAccepted:
+      type: object
+      required:
+        - feedbackId
+        - runId
+        - status
+        - receivedAt
+      properties:
+        feedbackId:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+        status:
+          const: ACCEPTED
+        receivedAt:
+          type: string
+          format: date-time
+      additionalProperties: false
+
+    Problem:
+      type: object
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        traceId:
+          type: string
+        violations:
+          type: array
+          items:
+            type: object
+            required:
+              - field
+              - message
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+      additionalProperties: false
+
+  responses:
+    BadRequest:
+      description: Anfrage syntaktisch ungültig
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    Unauthorized:
+      description: Authentifizierung fehlt oder ist ungültig
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    NotFound:
+      description: Auftrag nicht gefunden
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    Conflict:
+      description: Konflikt, beispielsweise doppelte Idempotency-ID
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    UnprocessableEntity:
+      description: Fachliche Validierung fehlgeschlagen
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+
+    InternalServerError:
+      description: Interner Verarbeitungsfehler
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"

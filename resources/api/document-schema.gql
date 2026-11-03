@@ -1,0 +1,314 @@
+schema {
+    query: Query
+    mutation: Mutation
+    subscription: Subscription
+}
+
+scalar UUID
+scalar DateTime
+scalar Decimal
+scalar SanitizedHTML
+
+type Query {
+    creditCase(caseId: ID!): CreditCase
+    generationJob(runId: UUID!): GenerationJob
+}
+
+type Mutation {
+    createBankCompanyAnalysis(
+        input: BankCompanyAnalysisInput!
+    ): JobAccepted!
+
+    createLeasingCompanyAnalysis(
+        input: LeasingCompanyAnalysisInput!
+    ): JobAccepted!
+
+    createBackOfficeVote(
+        input: BackOfficeVoteInput!
+    ): JobAccepted!
+
+    createMarketVote(
+        input: MarketVoteInput!
+    ): JobAccepted!
+
+    submitFeedback(
+        input: FeedbackInput!
+    ): FeedbackAccepted!
+}
+
+type Subscription {
+    generationJobUpdated(runId: UUID!): GenerationJob!
+}
+
+# ---------- Domain enums ----------
+
+enum BusinessType {
+    BANK
+    LEASING
+}
+
+enum DocumentType {
+    FIRMENANALYSE
+    MARKTFOLGE_VOTUM
+    MARKT_VOTUM
+}
+
+enum Language {
+    DE
+    EN
+}
+
+enum JobStatus {
+    ACCEPTED
+    PROCESSING
+    ERFOLG
+    TEILWEISE
+    FEHLER
+}
+
+enum DocumentStatus {
+    ENTWURF
+    FREIGEGEBEN
+}
+
+enum ContentFormat {
+    PLAIN_TEXT
+    HTML
+}
+
+enum FeedbackStatus {
+    FREIGEGEBEN
+    VERWORFEN
+    NEUERZEUGUNG_ANGEFORDERT
+}
+
+enum FeedbackCategory {
+    FACTUAL_ERROR
+    MISSING_INFORMATION
+    INCORRECT_REFERENCE
+    LANGUAGE
+    STRUCTURE
+    RISK_ASSESSMENT
+    OTHER
+}
+
+enum MessageSeverity {
+    INFO
+    WARNING
+    ERROR
+}
+
+# ---------- Queries ----------
+
+type CreditCase {
+    caseId: ID!
+    jobs(documentTypes: [DocumentType!]): [GenerationJob!]!
+    latestJob(documentType: DocumentType!): GenerationJob
+    feedback: [Feedback!]!
+}
+
+type GenerationJob {
+    runId: UUID!
+    caseId: ID!
+    businessType: BusinessType!
+    documentType: DocumentType!
+    triggeredBy: String!
+    language: Language!
+    status: JobStatus!
+    createdAt: DateTime!
+    updatedAt: DateTime!
+    messages: [ResultMessage!]!
+    result: GenerationResult
+    feedback: [Feedback!]!
+}
+
+type GenerationResult {
+    plainText: String!
+    html: SanitizedHTML
+    references: [Reference!]!
+    modelVersion: String!
+    promptVersion: String!
+    generatedAt: DateTime!
+}
+
+type Reference {
+    referenceId: ID!
+    statementId: ID
+    htmlAnchorId: ID
+    sourceSystem: String!
+    sourceKey: String!
+    documentId: String
+    balanceSheetId: String
+}
+
+type ResultMessage {
+    severity: MessageSeverity!
+    code: String!
+    message: String!
+}
+
+# ---------- Common inputs ----------
+
+input RequestMetadataInput {
+    caseId: ID!
+    triggeredBy: String!
+    language: Language! = DE
+    clientRequestId: UUID!
+}
+
+input ContentInput {
+    format: ContentFormat!
+    charset: String! = "UTF-8"
+    value: String!
+}
+
+input HistoricalDocumentInput {
+    content: ContentInput!
+    versionDate: DateTime!
+    status: DocumentStatus!
+}
+
+# ---------- Company analysis ----------
+
+input BankCompanyAnalysisInput {
+    metadata: RequestMetadataInput!
+    context: BankAnalysisContextInput!
+    previousCompanyAnalysis: HistoricalDocumentInput
+}
+
+input LeasingCompanyAnalysisInput {
+    metadata: RequestMetadataInput!
+    context: LeasingAnalysisContextInput!
+    previousCompanyAnalysis: HistoricalDocumentInput
+}
+
+input BankAnalysisContextInput {
+    creditUnit: CreditUnitInput!
+    balanceSheetId: String!
+    uekaKey: String!
+    fksKey: String!
+    standardReference: String
+}
+
+input LeasingAnalysisContextInput {
+    zgpId: String!
+    balanceSheetId: String!
+    uekaKey: String
+    standardReference: String
+    financialData: FinancialDataInput
+}
+
+input CreditUnitInput {
+    hvId: String!
+    snapshotDate: DateTime!
+    entities: [CreditUnitEntityInput!]!
+}
+
+input CreditUnitEntityInput {
+    zgpId: String!
+    role: String!
+    consolidationRelevant: Boolean!
+    leading: Boolean!
+}
+
+input FinancialDataInput {
+    version: String!
+    active: Boolean!
+    asOf: DateTime
+}
+
+# ---------- Votes ----------
+
+input BackOfficeVoteInput {
+    metadata: RequestMetadataInput!
+    businessType: BusinessType!
+    context: VoteContextInput
+    approvedCompanyAnalysis: HistoricalDocumentInput!
+    previousBackOfficeVote: HistoricalDocumentInput
+    application: CreditApplicationInput!
+}
+
+input MarketVoteInput {
+    metadata: RequestMetadataInput!
+    businessType: BusinessType!
+    context: VoteContextInput
+    approvedCompanyAnalysis: HistoricalDocumentInput!
+    previousBackOfficeVote: HistoricalDocumentInput
+    previousMarketVote: HistoricalDocumentInput
+    application: CreditApplicationInput!
+}
+
+input VoteContextInput {
+    zgpId: String
+    balanceSheetId: String
+    uekaKey: String
+    fksKey: String
+    standardReference: String
+    creditUnit: CreditUnitInput
+}
+
+input CreditApplicationInput {
+    subject: String!
+    reasons: [String!]!
+    limits: [MoneyAmountInput!]!
+    exposure: [MoneyAmountInput!]!
+    collateral: [String!]!
+    rating: String!
+}
+
+input MoneyAmountInput {
+    amount: Decimal!
+    currency: String! = "EUR"
+}
+
+# ---------- Feedback ----------
+
+input FeedbackInput {
+    runId: UUID!
+    submittedBy: String!
+    status: FeedbackStatus!
+    finalContent: ContentInput!
+    qualifiedFeedback: QualifiedFeedbackInput
+}
+
+input QualifiedFeedbackInput {
+    categories: [FeedbackCategory!]!
+    comment: String
+}
+
+type Feedback {
+    feedbackId: UUID!
+    runId: UUID!
+    submittedBy: String!
+    status: FeedbackStatus!
+    finalContent: Content!
+    qualifiedFeedback: QualifiedFeedback
+    receivedAt: DateTime!
+}
+
+type Content {
+    format: ContentFormat!
+    charset: String!
+    value: String!
+}
+
+type QualifiedFeedback {
+    categories: [FeedbackCategory!]!
+    comment: String
+}
+
+# ---------- Mutation results ----------
+
+type JobAccepted {
+    runId: UUID!
+    caseId: ID!
+    documentType: DocumentType!
+    status: JobStatus!
+    createdAt: DateTime!
+}
+
+type FeedbackAccepted {
+    feedbackId: UUID!
+    runId: UUID!
+    receivedAt: DateTime!
+}

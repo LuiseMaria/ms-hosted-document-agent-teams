@@ -1,0 +1,32 @@
+# Azure configs
+.azure
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv
+
+# IntelliJ IDEA project files
+.idea
+
+# ARM files transpiled from bicep build
+/infra/**/*.json
+!/infra/**/*parameters*.json
+
+### Environment Variables ###
+# Local environment configuration
+.env.local
+.env.*.local
+
+# drawio backup files
+**/*.drawio.bkp
+
+# MacOS system files
+.DS_Store
