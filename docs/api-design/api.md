@@ -1,3 +1,18 @@
+# Optional API Design Drafts
+
+These documents describe possible REST and GraphQL integrations. They are
+design drafts, not implemented services or deployment inputs. The current
+hosted agent and Teams integration do not depend on them.
+
+- [REST / OpenAPI draft](document-oas3.yml): asynchronous generation jobs,
+  status queries and feedback.
+- [GraphQL draft](document-schema.gql): an alternative schema for the same domain.
+
+The API hostnames are examples. These documents do not deploy endpoints or
+establish support for the operations and document types they describe.
+
+## Protocol Comparison
+
 | Kriterium           | SOAP                                                           | REST                                                   | GraphQL                                                                     |
 |---------------------|----------------------------------------------------------------|--------------------------------------------------------|-----------------------------------------------------------------------------|
 | **Vertragsmodell**  | Sehr strikt über WSDL/XSD                                      | Präzise über OpenAPI/JSON Schema                       | Stark typisiert, Enums und Pflichtfelder direkt im Schema                   |

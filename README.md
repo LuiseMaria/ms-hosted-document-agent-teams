@@ -32,6 +32,7 @@ settings in `azure.yaml` still specify the hosted agent's CPU and memory.
 | [azure.yaml](./azure.yaml) | Existing project binding and source-code deployment |
 | [azure-pipelines.yml](./azure-pipelines.yml) | Deployment to the existing Spoke |
 | [docs/infrastructure-rbac.md](./docs/infrastructure-rbac.md) | Infrastructure boundaries, monitoring and runtime identity |
+| [docs/api-design/api.md](./docs/api-design/api.md) | Optional REST/GraphQL design drafts; not implemented or used by the agent or deployment |
 
 ## Azure DevOps deployment
 
